@@ -1,3 +1,4 @@
+import { zip } from 'fflate';
 import './style.css';
 
 const appEl = document.querySelector<HTMLDivElement>('#app')!;
@@ -297,15 +298,22 @@ async function onImage(url: string) {
   const stickers: { blob: Blob, url: string }[] = [];
   const downloadStickerButton = document.createElement('button');
   downloadStickerButton.textContent = 'Download All Stickers';
-  downloadStickerButton.addEventListener('click', (ev) => {
+  downloadStickerButton.addEventListener('click', async (ev) => {
     ev.preventDefault();
 
+    const files: Record<string, Uint8Array> = {};
     const rnd = Math.random().toString(36).substring(2, 5);
     for (let i = 0; i < stickers.length; i++) {
-      const { url } = stickers[i];
+      const { blob } = stickers[i];
       const filename = 'Sticker' + rnd + '-' + (i + 1) + '.png';
-      download(url, filename);
+      files[filename] = new Uint8Array(await blob.arrayBuffer());
     }
+
+    zip(files, { level: 0 }, (err, data) => {
+      if (err) return console.error(err);
+      const blob = new Blob([data], { type: 'application/zip' });
+      download(URL.createObjectURL(blob), 'Stickers' + rnd + '.zip');
+    });
   });
   buttonBar.appendChild(downloadStickerButton);
 
