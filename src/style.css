@@ -57,6 +57,7 @@ h1 {
   margin-bottom: 1rem;
   gap: 0.8rem;
   overflow-x: scroll;
+  scrollbar-width: none;
 
   position: sticky;
   top: 0;
@@ -64,6 +65,9 @@ h1 {
   background: #fffa;
   padding: 0.5rem;
   box-sizing: border-box;
+}
+#buttonBar::-webkit-scrollbar {
+  display: none;
 }
 
 #buttonBar button {
