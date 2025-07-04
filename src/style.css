@@ -132,3 +132,58 @@ h1 {
   background: repeating-conic-gradient(#808080 0 25%, #0000 0 50%) 50% / 20px 20px;
   margin: 0.5rem;
 }
+
+@media (prefers-color-scheme: dark) {
+  body {
+    background-color: #242424;
+    color: rgba(255, 255, 255, 0.87);
+  }
+
+  #area {
+    color: #aaa;
+    border-color: #555;
+  }
+
+  #area.dragover {
+    border-color: #777;
+    background: #2a4a2c;
+    animation-name: pulseBackgroundDark;
+  }
+
+  @keyframes pulseBackgroundDark {
+    0% {
+      background: #2a4a2c;
+    }
+
+    100% {
+      background: #3a5a3c;
+    }
+  }
+
+  #buttonBar {
+    background: #242424fa;
+  }
+
+  #buttonBar button {
+    background: #444;
+    color: #eee;
+  }
+
+  #buttonBar button.active {
+    background: #006400;
+  }
+
+  #container {
+    border-color: #555;
+  }
+
+  #imgCanvas {
+    background: repeating-conic-gradient(#444 0 25%, #333 0 50%) 50% / 20px 20px;
+  }
+
+  #stickerContainer img {
+    border-color: #555;
+    background: repeating-conic-gradient(#555 0 25%, #0000 0 50%) 50% / 20px 20px;
+  }
+}
+
