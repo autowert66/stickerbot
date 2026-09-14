@@ -1,5 +1,7 @@
 import { defineConfig } from '@playwright/test';
 
+const baseURL = process.env.BASE_URL ?? 'http://localhost:4173';
+
 export default defineConfig({
   testDir: './tests',
   timeout: 300_000,
@@ -8,14 +10,16 @@ export default defineConfig({
   workers: 1,
   reporter: 'list',
   use: {
-    baseURL: 'http://localhost:4173',
+    baseURL,
     channel: 'chrome-canary',
     viewport: { width: 1280, height: 900 },
   },
-  webServer: {
-    command: 'pnpm build && pnpm preview --port 4173 --strictPort',
-    url: 'http://localhost:4173',
-    reuseExistingServer: true,
-    timeout: 120_000,
-  },
+  webServer: process.env.BASE_URL
+    ? undefined
+    : {
+        command: 'pnpm build && pnpm preview --port 4173 --strictPort',
+        url: baseURL,
+        reuseExistingServer: true,
+        timeout: 120_000,
+      },
 });
