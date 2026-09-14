@@ -191,3 +191,189 @@ h1 {
   }
 }
 
+#busy {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: grid;
+  place-items: center;
+  background: #0006;
+}
+
+#busy[hidden] {
+  display: none;
+}
+
+.busyCard {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.8rem;
+  min-width: 18rem;
+  padding: 1.5rem 2rem;
+  border-radius: 12px;
+  background: #fff;
+  color: #333;
+  box-shadow: 0 10px 40px #0005;
+}
+
+.spinner {
+  width: 2.5rem;
+  height: 2.5rem;
+  border: 4px solid #ddd;
+  border-top-color: #ff89d8;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.busyLabel {
+  font-weight: bold;
+}
+
+.busyBar {
+  width: 100%;
+  height: 0.5rem;
+  border-radius: 999px;
+  background: #eee;
+  overflow: hidden;
+}
+
+.busyBarFill {
+  width: 0;
+  height: 100%;
+  background: #ff89d8;
+  transition: width 0.2s ease-in-out;
+}
+
+#dialogBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 11;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: #0006;
+}
+
+#dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: 100%;
+  max-width: 24rem;
+  padding: 1.5rem;
+  border-radius: 12px;
+  background: #fff;
+  color: #333;
+  text-align: left;
+  box-shadow: 0 10px 40px #0005;
+}
+
+#dialog h2 {
+  margin: 0;
+  font-size: 1.4rem;
+}
+
+.dialogMessage {
+  margin: 0 0 0.5rem;
+  color: #666;
+}
+
+.dialogChoices {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.dialogChoice {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.75rem 1rem;
+  border: 2px solid #eee;
+  border-radius: 8px;
+  background: #fafafa;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease-in-out, background 0.15s ease-in-out;
+}
+
+.dialogChoice:hover,
+.dialogChoice:focus-visible {
+  border-color: #ff89d8;
+  background: #fff;
+}
+
+.dialogChoiceLabel {
+  font-weight: bold;
+  font-size: 1.1rem;
+}
+
+.dialogChoiceDesc {
+  font-size: 0.9rem;
+  color: #777;
+}
+
+.dialogCancel {
+  margin-top: 0.5rem;
+  padding: 0.5rem 1rem;
+  border: none;
+  border-radius: 4px;
+  background: #eee;
+  color: #333;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.dialogCancel:hover {
+  background: #e0e0e0;
+}
+
+@media (prefers-color-scheme: dark) {
+  .busyCard,
+  #dialog {
+    background: #333;
+    color: #eee;
+  }
+
+  .busyLabel {
+    color: #eee;
+  }
+
+  .busyBar {
+    background: #555;
+  }
+
+  .dialogMessage,
+  .dialogChoiceDesc {
+    color: #aaa;
+  }
+
+  .dialogChoice {
+    background: #3a3a3a;
+    border-color: #555;
+  }
+
+  .dialogChoice:hover,
+  .dialogChoice:focus-visible {
+    background: #444;
+    border-color: #ff89d8;
+  }
+
+  .dialogCancel {
+    background: #444;
+    color: #eee;
+  }
+
+  .dialogCancel:hover {
+    background: #555;
+  }
+}
+

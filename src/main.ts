@@ -1,7 +1,116 @@
+import { removeBackground, preload } from '@imgly/background-removal';
 import { zip } from 'fflate';
 import './style.css';
 
 const appEl = document.querySelector<HTMLDivElement>('#app')!;
+
+const AI_CONFIG = { device: 'gpu' as const };
+
+const busy = document.createElement('div');
+busy.id = 'busy';
+busy.hidden = true;
+busy.innerHTML = `
+  <div class="busyCard">
+    <div class="spinner"></div>
+    <div class="busyLabel"></div>
+    <div class="busyBar"><div class="busyBarFill"></div></div>
+  </div>
+`;
+document.body.appendChild(busy);
+const busyLabel = busy.querySelector<HTMLDivElement>('.busyLabel')!;
+const busyBar = busy.querySelector<HTMLDivElement>('.busyBar')!;
+const busyBarFill = busy.querySelector<HTMLDivElement>('.busyBarFill')!;
+
+function showBusy(message: string, progress?: number) {
+  busy.hidden = false;
+  busyLabel.textContent = message;
+  busyBar.style.display = progress == null ? 'none' : '';
+  busyBarFill.style.width = `${Math.round((progress ?? 0) * 100)}%`;
+}
+
+function hideBusy() {
+  busy.hidden = true;
+}
+
+interface DialogChoice {
+  label: string;
+  description?: string;
+  onSelect: () => void;
+}
+
+function openChoiceDialog(options: { title: string; message?: string; choices: DialogChoice[] }) {
+  const backdrop = document.createElement('div');
+  backdrop.id = 'dialogBackdrop';
+
+  const dialog = document.createElement('div');
+  dialog.id = 'dialog';
+  dialog.setAttribute('role', 'dialog');
+  dialog.setAttribute('aria-modal', 'true');
+  dialog.setAttribute('aria-label', options.title);
+
+  const title = document.createElement('h2');
+  title.textContent = options.title;
+  dialog.appendChild(title);
+
+  if (options.message) {
+    const message = document.createElement('p');
+    message.className = 'dialogMessage';
+    message.textContent = options.message;
+    dialog.appendChild(message);
+  }
+
+  const close = () => {
+    backdrop.remove();
+    document.removeEventListener('keydown', onKeyDown);
+  };
+
+  const onKeyDown = (ev: KeyboardEvent) => {
+    if (ev.key === 'Escape') close();
+  };
+
+  const choicesEl = document.createElement('div');
+  choicesEl.className = 'dialogChoices';
+
+  for (const choice of options.choices) {
+    const button = document.createElement('button');
+    button.className = 'dialogChoice';
+
+    const label = document.createElement('span');
+    label.className = 'dialogChoiceLabel';
+    label.textContent = choice.label;
+    button.appendChild(label);
+
+    if (choice.description) {
+      const description = document.createElement('span');
+      description.className = 'dialogChoiceDesc';
+      description.textContent = choice.description;
+      button.appendChild(description);
+    }
+
+    button.addEventListener('click', () => {
+      close();
+      choice.onSelect();
+    });
+    choicesEl.appendChild(button);
+  }
+
+  dialog.appendChild(choicesEl);
+
+  const cancel = document.createElement('button');
+  cancel.className = 'dialogCancel';
+  cancel.textContent = 'Cancel';
+  cancel.addEventListener('click', close);
+  dialog.appendChild(cancel);
+
+  backdrop.addEventListener('click', (ev) => {
+    if (ev.target === backdrop) close();
+  });
+
+  backdrop.appendChild(dialog);
+  document.body.appendChild(backdrop);
+  document.addEventListener('keydown', onKeyDown);
+  dialog.querySelector('button')?.focus();
+}
 
 const area = document.createElement('div');
 area.id = 'area';
@@ -65,6 +174,15 @@ function loadImage(url: string) {
   });
 }
 
+function canvasToBlob(canvas: HTMLCanvasElement) {
+  return new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) resolve(blob);
+      else reject(new Error('Failed to encode image'));
+    }, 'image/png');
+  });
+}
+
 async function onImage(url: string) {
   const img = await loadImage(url);
   const { width, height } = img;
@@ -121,13 +239,67 @@ async function onImage(url: string) {
   removeBgButton.textContent = 'Remove Background';
   removeBgButton.addEventListener('click', (ev) => {
     ev.preventDefault();
+    if (removeBgButton.disabled) return;
+
+    openChoiceDialog({
+      title: 'Remove Background',
+      message: 'Choose how to erase the background.',
+      choices: [
+        {
+          label: 'AI (automatic)',
+          description: 'Runs an on-device model. Best for photos and complex edges.',
+          onSelect: removeBackgroundWithAI,
+        },
+        {
+          label: 'Manual (click a color)',
+          description: 'Flood-fills the color you click, like a magic wand.',
+          onSelect: startManualRemoval,
+        },
+      ],
+    });
+  });
+  buttonBar.appendChild(removeBgButton);
+
+  function startManualRemoval() {
     clearTool();
 
     imgCanvas.style.cursor = 'crosshair';
     removeBgButton.classList.add('active');
     imgCanvas.addEventListener('click', removeBgOnClick, { once: true });
-  });
-  buttonBar.appendChild(removeBgButton);
+  }
+
+  async function removeBackgroundWithAI() {
+    clearTool();
+    removeBgButton.disabled = true;
+
+    let resultUrl: string | undefined;
+    try {
+      await preload({
+        ...AI_CONFIG,
+        progress: (_key, current, total) => {
+          showBusy('Downloading model…', total ? current / total : undefined);
+        },
+      });
+
+      showBusy('Removing background…');
+      const sourceBlob = await canvasToBlob(imgCanvas);
+      const resultBlob = await removeBackground(sourceBlob, AI_CONFIG);
+
+      resultUrl = URL.createObjectURL(resultBlob);
+      const resultImg = await loadImage(resultUrl);
+
+      imgCtx.clearRect(0, 0, width, height);
+      imgCtx.drawImage(resultImg, 0, 0, width, height);
+      selectStickerButton.disabled = false;
+    } catch (err) {
+      console.error(err);
+      alert(`Background removal failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      hideBusy();
+      removeBgButton.disabled = false;
+      if (resultUrl) URL.revokeObjectURL(resultUrl);
+    }
+  }
 
   function removeBgOnClick(ev: MouseEvent) {
     const { x, y } = getCanvasCoords(ev);
