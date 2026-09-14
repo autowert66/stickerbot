@@ -573,102 +573,125 @@ async function onImage(url: string) {
     path = [];
   }
 
-  const SELECT_SOLID_ALPHA = 128;
   const SELECT_FEATHER_PASSES = 2;
+  // The AI matte is soft: the background and the faint bridges it leaves
+  // between neighbouring stickers sit below this opacity, while sticker cores
+  // sit well above it. Treat anything fainter as background so stickers stay
+  // separate, then let the feather pass recover the anti-aliased edge.
+  const SELECT_CORE_ALPHA = 180;
 
   function selectSticker(seedPoints: [number, number][]) {
-    const { encode, decode } = packer(width, height);
     const imgData = imgCtx.getImageData(0, 0, width, height);
-    const getColor = getImageDataColor.bind(null, imgData);
+    const data = imgData.data;
+    const pixelCount = width * height;
+    const alphaAt = (n: number) => data[n * 4 + 3];
 
-    const checked = new Set<number>();
-    const matches = new Set<number>();
+    const seedIndices: number[] = [];
+    let seedAlpha = 0;
+    for (const [x, y] of seedPoints) {
+      if (x < 0 || y < 0 || x >= width || y >= height) continue;
+      const n = y * width + x;
+      seedIndices.push(n);
+      if (alphaAt(n) > seedAlpha) seedAlpha = alphaAt(n);
+    }
+    if (seedIndices.length === 0 || seedAlpha === 0) return;
 
-    const toCheck: number[] = seedPoints.map(([x, y]) => encode(x, y));
+    const visited = new Uint8Array(pixelCount);
+    const stack = new Int32Array(pixelCount);
+
+    // Flood the connected component reachable from the seeds through pixels
+    // whose alpha is at least `limit`, collecting pixel indices into `out`.
+    const grow = (limit: number, out: number[]) => {
+      visited.fill(0);
+      let top = 0;
+      for (const n of seedIndices) {
+        if (!visited[n] && alphaAt(n) >= limit) {
+          visited[n] = 1;
+          stack[top++] = n;
+        }
+      }
+      while (top > 0) {
+        const n = stack[--top];
+        out.push(n);
+
+        const x = n % width;
+        const y = (n / width) | 0;
+        if (x > 0) { const m = n - 1; if (!visited[m] && alphaAt(m) >= limit) { visited[m] = 1; stack[top++] = m; } }
+        if (x < width - 1) { const m = n + 1; if (!visited[m] && alphaAt(m) >= limit) { visited[m] = 1; stack[top++] = m; } }
+        if (y > 0) { const m = n - width; if (!visited[m] && alphaAt(m) >= limit) { visited[m] = 1; stack[top++] = m; } }
+        if (y < height - 1) { const m = n + width; if (!visited[m] && alphaAt(m) >= limit) { visited[m] = 1; stack[top++] = m; } }
+      }
+    };
 
     console.time('find matches')
-    // Traverse only solid pixels so faint anti-aliasing or AI matte noise in the
-    // background cannot bridge the region and swallow the whole image.
-    while (toCheck.length) {
-      const n = toCheck.pop()!;
-      if (checked.has(n)) continue;
-
-      const [x, y] = decode(n);
-      if (x < 0 || y < 0 || x >= width || y >= height) continue;
-      checked.add(n);
-
-      const [, , , a] = getColor(x, y);
-      if (a >= SELECT_SOLID_ALPHA) {
-        matches.add(n);
-        toCheck.push(
-          encode(x + 1, y), encode(x - 1, y),
-          encode(x, y + 1), encode(x, y - 1),
-        );
-      }
-    }
+    const matches: number[] = [];
+    grow(Math.min(SELECT_CORE_ALPHA, seedAlpha), matches);
 
     // Grow a couple of pixels back into the soft edge so cut-outs keep their
     // feathering without letting the region leak across the background.
-    let frontier = [...matches];
+    let frontier = matches.slice();
     for (let pass = 0; pass < SELECT_FEATHER_PASSES && frontier.length; pass++) {
       const next: number[] = [];
       for (const n of frontier) {
-        const [x, y] = decode(n);
+        const x = n % width;
+        const y = (n / width) | 0;
         for (let dy = -1; dy <= 1; dy++) {
           for (let dx = -1; dx <= 1; dx++) {
+            if (dx === 0 && dy === 0) continue;
+
             const nx = x + dx;
             const ny = y + dy;
             if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
 
-            const nn = encode(nx, ny);
-            if (matches.has(nn) || checked.has(nn)) continue;
-            checked.add(nn);
+            const m = ny * width + nx;
+            if (visited[m] || data[m * 4 + 3] === 0) continue;
 
-            const [, , , a] = getColor(nx, ny);
-            if (a > 0) {
-              matches.add(nn);
-              next.push(nn);
-            }
+            visited[m] = 1;
+            matches.push(m);
+            next.push(m);
           }
         }
       }
       frontier = next;
     }
-    console.timeEnd('find matches')
+    console.timeEnd('find matches');
 
-    let minX = Infinity, minY = Infinity;
-    let maxX = -Infinity, maxY = -Infinity;
+    let minX = width, minY = height, maxX = -1, maxY = -1;
     for (const n of matches) {
-      const [x, y] = decode(n);
-      minX = Math.min(minX, x);
-      minY = Math.min(minY, y);
-      maxX = Math.max(maxX, x);
-      maxY = Math.max(maxY, y);
+      const x = n % width;
+      const y = (n / width) | 0;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
     }
 
-    if (minX === maxX || minY === maxY) return;
+    if (maxX < 0 || minX === maxX || minY === maxY) return;
 
-    const newImageData = new ImageData(maxX - minX, maxY - minY);
+    const outWidth = maxX - minX + 1;
+    const outHeight = maxY - minY + 1;
+    const newImageData = new ImageData(outWidth, outHeight);
     for (const n of matches) {
-      const [x, y] = decode(n);
-      const [r, g, b, a] = getColor(x, y);
-      const index = (y - minY) * newImageData.width * 4 + (x - minX) * 4;
-      newImageData.data[index + 0] = r;
-      newImageData.data[index + 1] = g;
-      newImageData.data[index + 2] = b;
-      newImageData.data[index + 3] = a;
-      imgCtx.clearRect(x, y, 1, 1);
+      const x = n % width;
+      const y = (n / width) | 0;
+      const source = n * 4;
+      const target = ((y - minY) * outWidth + (x - minX)) * 4;
+      newImageData.data[target + 0] = data[source + 0];
+      newImageData.data[target + 1] = data[source + 1];
+      newImageData.data[target + 2] = data[source + 2];
+      newImageData.data[target + 3] = data[source + 3];
+      data[source + 3] = 0;
     }
+    imgCtx.putImageData(imgData, 0, 0);
 
     hightlightCtx.clearRect(0, 0, width, height);
     hightlightCtx.putImageData(newImageData, minX, minY);
 
     hightlightCtx.strokeStyle = '#00fa';
     hightlightCtx.lineWidth = 6;
-    hightlightCtx.rect(minX, minY, maxX - minX, maxY - minY);
-    hightlightCtx.stroke();
+    hightlightCtx.strokeRect(minX, minY, outWidth, outHeight);
 
-    const renderCanvas = new OffscreenCanvas(newImageData.width, newImageData.height);
+    const renderCanvas = new OffscreenCanvas(outWidth, outHeight);
     renderCanvas.getContext('2d')!.putImageData(newImageData, 0, 0);
     renderCanvas.convertToBlob({ type: 'image/png' }).then(onSticker);
   }

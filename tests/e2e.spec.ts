@@ -23,6 +23,21 @@ function pngChunk(type: string, data: Buffer) {
   return Buffer.concat([length, typeBuf, data, crc]);
 }
 
+function encodePng(width: number, height: number, raw: Buffer) {
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8;
+  ihdr[9] = 2;
+
+  return Buffer.concat([
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+    pngChunk('IHDR', ihdr),
+    pngChunk('IDAT', deflateSync(raw)),
+    pngChunk('IEND', Buffer.alloc(0)),
+  ]);
+}
+
 function makeSubjectPng(size: number) {
   const raw = Buffer.alloc((size * 3 + 1) * size);
   let offset = 0;
@@ -37,19 +52,28 @@ function makeSubjectPng(size: number) {
       raw[offset++] = b;
     }
   }
+  return encodePng(size, size, raw);
+}
 
-  const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(size, 0);
-  ihdr.writeUInt32BE(size, 4);
-  ihdr[8] = 8;
-  ihdr[9] = 2;
-
-  return Buffer.concat([
-    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
-    pngChunk('IHDR', ihdr),
-    pngChunk('IDAT', deflateSync(raw)),
-    pngChunk('IEND', Buffer.alloc(0)),
-  ]);
+function makeTwoSubjectsPng(width: number, height: number) {
+  const raw = Buffer.alloc((width * 3 + 1) * height);
+  let offset = 0;
+  const radius = Math.min(width, height) * 0.3;
+  const centers: [number, number][] = [
+    [width * 0.25, height * 0.5],
+    [width * 0.75, height * 0.5],
+  ];
+  for (let y = 0; y < height; y++) {
+    raw[offset++] = 0;
+    for (let x = 0; x < width; x++) {
+      const inside = centers.some(([cx, cy]) => Math.hypot(x - cx, y - cy) < radius);
+      const [r, g, b] = inside ? [255, 255, 255] : [0x33, 0x66, 0xcc];
+      raw[offset++] = r;
+      raw[offset++] = g;
+      raw[offset++] = b;
+    }
+  }
+  return encodePng(width, height, raw);
 }
 
 async function upload(page: Page, file: { name: string; mimeType: string; buffer: Buffer }) {
@@ -242,4 +266,46 @@ test('faint alpha noise in the background does not leak into the selection', asy
   }));
   expect(sticker.w).toBeLessThan(160);
   expect(sticker.h).toBeLessThan(160);
+});
+
+test('a faint bridge between two subjects does not merge them into one sticker', async ({ page }) => {
+  await page.goto('/');
+  await upload(page, { name: 'sheet.png', mimeType: 'image/png', buffer: makeTwoSubjectsPng(400, 200) });
+
+  await page.getByRole('button', { name: 'Remove Background' }).click();
+  await page.locator('.dialogChoice', { hasText: 'Manual' }).click();
+  const background = await canvasPoint(page, 0.02, 0.05);
+  await page.mouse.click(background.x, background.y);
+  await expect.poll(() => canvasAlpha(page, 0.01, 0.05)).toBe(0);
+
+  // Mimic an AI matte that leaves a faint (alpha 150) bridge between the two
+  // subjects. That is below the solid-core threshold, so it must not be crossed.
+  await page.locator('#imgCanvas').evaluate((element) => {
+    const canvas = element as HTMLCanvasElement;
+    const ctx = canvas.getContext('2d')!;
+    const image = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const y = Math.floor(canvas.height / 2);
+    for (let x = 0; x < canvas.width; x++) {
+      const i = (y * canvas.width + x) * 4;
+      if (image.data[i + 3] === 0) image.data[i + 3] = 150;
+    }
+    ctx.putImageData(image, 0, 0);
+  });
+
+  await page.getByRole('button', { name: 'Select Sticker' }).click();
+  const start = await canvasPoint(page, 0.2, 0.5);
+  const end = await canvasPoint(page, 0.3, 0.5);
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  await page.mouse.move(end.x, end.y, { steps: 5 });
+  await page.mouse.up();
+
+  await expect(page.locator('#stickerContainer img')).toHaveCount(1);
+  const sticker = await page.locator('#stickerContainer img').first().evaluate((img) => ({
+    w: (img as HTMLImageElement).naturalWidth,
+    h: (img as HTMLImageElement).naturalHeight,
+  }));
+  expect(sticker.w).toBeLessThan(200);
+  expect(sticker.h).toBeLessThan(200);
+  expect(sticker.w).toBeGreaterThan(80);
 });
