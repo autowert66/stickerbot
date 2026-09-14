@@ -233,6 +233,8 @@ async function onImage(url: string) {
     imgCanvas.removeEventListener('touchstart', selectMouseDown);
     imgCanvas.removeEventListener('touchmove', selectMouseMove);
     imgCanvas.removeEventListener('touchend', selectMouseUp);
+
+    closeSelectMenu();
   }
 
   const removeBgButton = document.createElement('button');
@@ -290,7 +292,7 @@ async function onImage(url: string) {
 
       imgCtx.clearRect(0, 0, width, height);
       imgCtx.drawImage(resultImg, 0, 0, width, height);
-      selectStickerButton.disabled = false;
+      enableSelectTool();
     } catch (err) {
       console.error(err);
       alert(`Background removal failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -340,14 +342,22 @@ async function onImage(url: string) {
     }
 
     clearTool();
-    selectStickerButton.disabled = false;
+    enableSelectTool();
   }
 
+  type SelectMode = 'line' | 'freeform';
+  let selectMode: SelectMode = 'line';
+
+  const selectWrapper = document.createElement('div');
+  selectWrapper.id = 'selectTool';
+
   const selectStickerButton = document.createElement('button');
+  selectStickerButton.id = 'selectStickerButton';
   selectStickerButton.textContent = 'Select Sticker';
   selectStickerButton.disabled = true;
   selectStickerButton.addEventListener('click', (ev) => {
     ev.preventDefault();
+    if (selectStickerButton.disabled) return;
     if (selectStickerButton.classList.contains('active')) {
       clearTool();
       return;
@@ -363,14 +373,155 @@ async function onImage(url: string) {
     imgCanvas.addEventListener('touchmove', selectMouseMove);
     imgCanvas.addEventListener('touchend', selectMouseUp);
   });
-  buttonBar.appendChild(selectStickerButton);
+
+  const selectToggleButton = document.createElement('button');
+  selectToggleButton.id = 'selectToggleButton';
+  selectToggleButton.type = 'button';
+  selectToggleButton.disabled = true;
+  selectToggleButton.setAttribute('aria-haspopup', 'true');
+  selectToggleButton.setAttribute('aria-expanded', 'false');
+  selectToggleButton.setAttribute('aria-label', 'Choose selection mode');
+  selectToggleButton.textContent = '▾';
+
+  const selectMenu = document.createElement('div');
+  selectMenu.id = 'selectMenu';
+  selectMenu.hidden = true;
+  selectMenu.setAttribute('role', 'menu');
+
+  const selectModes: { mode: SelectMode; label: string; hint: string }[] = [
+    { mode: 'line', label: 'Line', hint: 'Swipe a straight line across the sticker' },
+    { mode: 'freeform', label: 'Freeform', hint: 'Draw freely over the sticker' },
+  ];
+
+  const selectMenuItems = selectModes.map((option) => {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'selectMenuItem';
+    item.setAttribute('role', 'menuitemradio');
+
+    const check = document.createElement('span');
+    check.className = 'selectMenuCheck';
+
+    const text = document.createElement('span');
+    text.className = 'selectMenuText';
+
+    const label = document.createElement('strong');
+    label.textContent = option.label;
+
+    const hint = document.createElement('small');
+    hint.textContent = option.hint;
+
+    text.appendChild(label);
+    text.appendChild(hint);
+    item.appendChild(check);
+    item.appendChild(text);
+
+    item.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      setSelectMode(option.mode);
+      closeSelectMenu();
+    });
+
+    selectMenu.appendChild(item);
+    return item;
+  });
+
+  function setSelectMode(mode: SelectMode) {
+    selectMode = mode;
+    selectModes.forEach((option, index) => {
+      const active = option.mode === mode;
+      selectMenuItems[index].classList.toggle('active', active);
+      selectMenuItems[index].setAttribute('aria-checked', String(active));
+    });
+    selectStickerButton.title = `Select Sticker (${mode})`;
+  }
+
+  function enableSelectTool() {
+    selectStickerButton.disabled = false;
+    selectToggleButton.disabled = false;
+  }
+
+  function closeSelectMenu() {
+    selectMenu.hidden = true;
+    selectToggleButton.setAttribute('aria-expanded', 'false');
+    document.removeEventListener('pointerdown', onDocumentPointerDown, true);
+    document.removeEventListener('keydown', onDocumentKeyDown);
+  }
+
+  function onDocumentPointerDown(ev: PointerEvent) {
+    if (ev.target instanceof Node && (selectWrapper.contains(ev.target) || selectMenu.contains(ev.target))) return;
+    closeSelectMenu();
+  }
+
+  function onDocumentKeyDown(ev: KeyboardEvent) {
+    if (ev.key === 'Escape') {
+      closeSelectMenu();
+      selectToggleButton.focus();
+    }
+  }
+
+  function openSelectMenu() {
+    selectMenu.hidden = false;
+    selectToggleButton.setAttribute('aria-expanded', 'true');
+
+    const rect = selectToggleButton.getBoundingClientRect();
+    const width = 240;
+    selectMenu.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - width - 8))}px`;
+    selectMenu.style.top = `${rect.bottom + 4}px`;
+
+    document.addEventListener('pointerdown', onDocumentPointerDown, true);
+    document.addEventListener('keydown', onDocumentKeyDown);
+  }
+
+  selectToggleButton.addEventListener('click', (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    if (selectToggleButton.disabled) return;
+    if (selectMenu.hidden) openSelectMenu();
+    else closeSelectMenu();
+  });
+
+  setSelectMode('line');
+
+  selectWrapper.appendChild(selectStickerButton);
+  selectWrapper.appendChild(selectToggleButton);
+  selectWrapper.appendChild(selectMenu);
+  buttonBar.appendChild(selectWrapper);
 
   let down = false;
   let startX: number, startY: number;
+  let path: [number, number][] = [];
+
   const renderLine = (endX = startX, endY = startY) => {
     hightlightCtx.clearRect(0, 0, width, height);
     drawLine(hightlightCtx, startX, startY, endX, endY, '#f008');
   };
+
+  const renderPath = () => {
+    hightlightCtx.clearRect(0, 0, width, height);
+    if (path.length === 0) return;
+
+    hightlightCtx.beginPath();
+    hightlightCtx.moveTo(path[0][0], path[0][1]);
+    for (const [x, y] of path) hightlightCtx.lineTo(x, y);
+    hightlightCtx.strokeStyle = '#f008';
+    hightlightCtx.lineWidth = 3;
+    hightlightCtx.lineJoin = 'round';
+    hightlightCtx.lineCap = 'round';
+    hightlightCtx.stroke();
+  };
+
+  function pushPathPoint(x: number, y: number) {
+    const last = path[path.length - 1];
+    if (!last) {
+      path.push([x, y]);
+      return;
+    }
+
+    for (const [px, py] of getLinePoints(last[0], last[1], x, y).slice(1)) {
+      path.push([px, py]);
+    }
+  }
 
   function selectMouseDown(ev: MouseEvent | TouchEvent) {
     ev.preventDefault();
@@ -379,26 +530,50 @@ async function onImage(url: string) {
     down = true;
     startX = x;
     startY = y;
-    renderLine();
+    path = [];
+
+    if (selectMode === 'line') {
+      renderLine();
+    } else {
+      pushPathPoint(x, y);
+      renderPath();
+    }
   }
+
   function selectMouseMove(ev: MouseEvent | TouchEvent) {
     if (!down) return;
     ev.preventDefault();
 
     const { x, y } = getCanvasCoords(ev);
-    renderLine(x, y);
+    if (selectMode === 'line') {
+      renderLine(x, y);
+    } else {
+      pushPathPoint(x, y);
+      renderPath();
+    }
   }
+
   function selectMouseUp(ev: MouseEvent | TouchEvent) {
     ev.preventDefault();
     down = false;
 
     const { x, y } = getCanvasCoords(ev);
-    renderLine(x, y);
 
-    selectSticker(startX, startY, x, y);
+    let seeds: [number, number][];
+    if (selectMode === 'line') {
+      renderLine(x, y);
+      seeds = getLinePoints(startX, startY, x, y);
+    } else {
+      pushPathPoint(x, y);
+      renderPath();
+      seeds = path;
+    }
+
+    selectSticker(seeds);
+    path = [];
   }
 
-  function selectSticker(x1: number, y1: number, x2: number, y2: number) {
+  function selectSticker(seedPoints: [number, number][]) {
     const { encode, decode } = packer(width, height);
     const imgData = imgCtx.getImageData(0, 0, width, height);
     const getColor = getImageDataColor.bind(null, imgData);
@@ -406,8 +581,7 @@ async function onImage(url: string) {
     const checked = new Set<number>();
     const matches = new Set<number>();
 
-    const linePoints = getLinePoints(x1, y1, x2, y2);
-    const toCheck: number[] = linePoints.map(([x, y]) => encode(x, y));
+    const toCheck: number[] = seedPoints.map(([x, y]) => encode(x, y));
 
     console.time('find matches')
     while (toCheck.length) {
@@ -553,8 +727,8 @@ function drawLine(ctx: CanvasRenderingContext2D, x1: number, y1: number, x2: num
   ctx.stroke();
 }
 
-function getLinePoints(x1: number, y1: number, x2: number, y2: number) {
-  const cells = [];
+function getLinePoints(x1: number, y1: number, x2: number, y2: number): [number, number][] {
+  const cells: [number, number][] = [];
 
   let dx = Math.abs(x2 - x1);
   let dy = Math.abs(y2 - y1);

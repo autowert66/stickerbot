@@ -97,12 +97,53 @@ test('manual removal + sticker extraction', async ({ page }) => {
   await expect.poll(() => canvasAlpha(page, 0.01, 0.01)).toBe(0);
   expect(await canvasAlpha(page, 0.5, 0.5)).toBe(255);
 
+  await page.locator('#selectToggleButton').click();
+  await expect(page.locator('#selectMenu')).toBeVisible();
+  await expect(page.locator('#selectMenu .selectMenuItem.active')).toContainText('Line');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#selectMenu')).toBeHidden();
+
   await page.getByRole('button', { name: 'Select Sticker' }).click();
   const start = await canvasPoint(page, 0.35, 0.5);
   const end = await canvasPoint(page, 0.65, 0.5);
   await page.mouse.move(start.x, start.y);
   await page.mouse.down();
   await page.mouse.move(end.x, end.y, { steps: 5 });
+  await page.mouse.up();
+
+  await expect(page.locator('#stickerContainer img')).toHaveCount(1);
+});
+
+test('freeform selection via split button', async ({ page }) => {
+  await page.goto('/');
+  await upload(page, { name: 'subject.png', mimeType: 'image/png', buffer: makeSubjectPng(200) });
+
+  await page.getByRole('button', { name: 'Remove Background' }).click();
+  await page.locator('.dialogChoice', { hasText: 'Manual' }).click();
+  const background = await canvasPoint(page, 0.05, 0.05);
+  await page.mouse.click(background.x, background.y);
+  await expect.poll(() => canvasAlpha(page, 0.01, 0.01)).toBe(0);
+
+  await page.locator('#selectToggleButton').click();
+  await page.locator('#selectMenu .selectMenuItem', { hasText: 'Freeform' }).click();
+  await expect(page.locator('#selectMenu')).toBeHidden();
+
+  await page.locator('#selectToggleButton').click();
+  await expect(page.locator('#selectMenu .selectMenuItem.active')).toContainText('Freeform');
+  await page.keyboard.press('Escape');
+
+  await page.getByRole('button', { name: 'Select Sticker' }).click();
+
+  const waypoints = [
+    await canvasPoint(page, 0.3, 0.45),
+    await canvasPoint(page, 0.42, 0.56),
+    await canvasPoint(page, 0.5, 0.44),
+    await canvasPoint(page, 0.58, 0.56),
+    await canvasPoint(page, 0.7, 0.45),
+  ];
+  await page.mouse.move(waypoints[0].x, waypoints[0].y);
+  await page.mouse.down();
+  for (const point of waypoints.slice(1)) await page.mouse.move(point.x, point.y, { steps: 10 });
   await page.mouse.up();
 
   await expect(page.locator('#stickerContainer img')).toHaveCount(1);
