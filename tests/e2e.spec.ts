@@ -186,4 +186,60 @@ test('AI removal removes the background from a photo', async ({ page }) => {
 
   expect(stats.transparent).toBeGreaterThan(0);
   expect(stats.opaque).toBeGreaterThan(0);
+
+  // The AI matte has faint alpha in the background; selecting the subject must
+  // not swallow the whole canvas.
+  await page.getByRole('button', { name: 'Select Sticker' }).click();
+  const start = await canvasPoint(page, 0.45, 0.5);
+  const end = await canvasPoint(page, 0.55, 0.5);
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  await page.mouse.move(end.x, end.y, { steps: 5 });
+  await page.mouse.up();
+
+  const sticker = await page.locator('#stickerContainer img').first().evaluate((img) => ({
+    w: (img as HTMLImageElement).naturalWidth,
+    h: (img as HTMLImageElement).naturalHeight,
+  }));
+  expect(sticker.w).toBeGreaterThan(0);
+  expect(sticker.w).toBeLessThan(700);
+  expect(sticker.h).toBeLessThan(600);
+});
+
+test('faint alpha noise in the background does not leak into the selection', async ({ page }) => {
+  await page.goto('/');
+  await upload(page, { name: 'subject.png', mimeType: 'image/png', buffer: makeSubjectPng(200) });
+
+  await page.getByRole('button', { name: 'Remove Background' }).click();
+  await page.locator('.dialogChoice', { hasText: 'Manual' }).click();
+  const background = await canvasPoint(page, 0.05, 0.05);
+  await page.mouse.click(background.x, background.y);
+  await expect.poll(() => canvasAlpha(page, 0.01, 0.01)).toBe(0);
+
+  // Mimic an AI matte: nearly transparent but non-zero alpha everywhere in the
+  // background, fully connecting it to the subject.
+  await page.locator('#imgCanvas').evaluate((element) => {
+    const canvas = element as HTMLCanvasElement;
+    const ctx = canvas.getContext('2d')!;
+    const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    for (let i = 3; i < data.data.length; i += 4) {
+      if (data.data[i] === 0) data.data[i] = 2;
+    }
+    ctx.putImageData(data, 0, 0);
+  });
+
+  await page.getByRole('button', { name: 'Select Sticker' }).click();
+  const start = await canvasPoint(page, 0.35, 0.5);
+  const end = await canvasPoint(page, 0.65, 0.5);
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  await page.mouse.move(end.x, end.y, { steps: 5 });
+  await page.mouse.up();
+
+  const sticker = await page.locator('#stickerContainer img').first().evaluate((img) => ({
+    w: (img as HTMLImageElement).naturalWidth,
+    h: (img as HTMLImageElement).naturalHeight,
+  }));
+  expect(sticker.w).toBeLessThan(160);
+  expect(sticker.h).toBeLessThan(160);
 });

@@ -573,6 +573,9 @@ async function onImage(url: string) {
     path = [];
   }
 
+  const SELECT_SOLID_ALPHA = 128;
+  const SELECT_FEATHER_PASSES = 2;
+
   function selectSticker(seedPoints: [number, number][]) {
     const { encode, decode } = packer(width, height);
     const imgData = imgCtx.getImageData(0, 0, width, height);
@@ -584,6 +587,8 @@ async function onImage(url: string) {
     const toCheck: number[] = seedPoints.map(([x, y]) => encode(x, y));
 
     console.time('find matches')
+    // Traverse only solid pixels so faint anti-aliasing or AI matte noise in the
+    // background cannot bridge the region and swallow the whole image.
     while (toCheck.length) {
       const n = toCheck.pop()!;
       if (checked.has(n)) continue;
@@ -593,14 +598,41 @@ async function onImage(url: string) {
       checked.add(n);
 
       const [, , , a] = getColor(x, y);
-      const isMatch = a !== 0;
-      if (isMatch) {
+      if (a >= SELECT_SOLID_ALPHA) {
         matches.add(n);
         toCheck.push(
           encode(x + 1, y), encode(x - 1, y),
           encode(x, y + 1), encode(x, y - 1),
         );
       }
+    }
+
+    // Grow a couple of pixels back into the soft edge so cut-outs keep their
+    // feathering without letting the region leak across the background.
+    let frontier = [...matches];
+    for (let pass = 0; pass < SELECT_FEATHER_PASSES && frontier.length; pass++) {
+      const next: number[] = [];
+      for (const n of frontier) {
+        const [x, y] = decode(n);
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            const nx = x + dx;
+            const ny = y + dy;
+            if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+
+            const nn = encode(nx, ny);
+            if (matches.has(nn) || checked.has(nn)) continue;
+            checked.add(nn);
+
+            const [, , , a] = getColor(nx, ny);
+            if (a > 0) {
+              matches.add(nn);
+              next.push(nn);
+            }
+          }
+        }
+      }
+      frontier = next;
     }
     console.timeEnd('find matches')
 
